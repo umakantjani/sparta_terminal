@@ -1,7 +1,6 @@
 streamlit
-yfinance
+yfinance>=1.0.0
 pandas
 pandas-ta
 supabase
 google-generativeai
-curl_cffi
