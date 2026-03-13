@@ -31,19 +31,36 @@ def get_gemini_analysis(ticker, price, signal, b_width, rsi, sma50, valuation):
     return response.text
 
 def get_sniper_report(ticker):
-    # We no longer pass a custom session. 
-    # yfinance 1.0+ handles impersonation internally now.
     stock = yf.Ticker(ticker)
     
     try:
-        # auto_adjust=True is critical for technical accuracy
+        # Try Live Data first
         df = stock.history(period="1y", auto_adjust=True)
-    except Exception as e:
-        st.error(f"Data Retrieval Error: {e}")
-        return None, "ERROR", {}, 0
-    
-    if df.empty:
-        return None, "NO DATA", {}, 0
+        if df.empty: raise ValueError("Empty DF")
+    except Exception:
+        # FALLBACK: Pull from Supabase Archive
+        from supabase import create_client
+        import streamlit as st
+        
+        supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+        
+        # Query the last saved report for this ticker
+        response = supabase.table("sniper_reports")\
+            .select("*")\
+            .eq("ticker", ticker)\
+            .order("created_at", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data:
+            # Reconstruct a single-row DataFrame from the archive
+            archive = response.data[0]
+            st.warning(f"⚠️ OFFLINE: Showing Archived Data from {archive['created_at']}")
+            
+            # We return a dummy DF and the archived signal/valuation
+            return None, archive['signal'], archive['valuation_report'], 0.04 # 0.04 as a placeholder
+        else:
+            return None, "NO_DATA", {}, 0
 
     # Flatten MultiIndex columns (Fix for the previous KeyError)
     if isinstance(df.columns, pd.MultiIndex):
