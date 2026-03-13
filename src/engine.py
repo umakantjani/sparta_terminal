@@ -3,7 +3,6 @@ import pandas_ta as ta
 import yfinance as yf
 import google.generativeai as genai
 import streamlit as st
-from curl_cffi import requests as curl_requests
 
 # Configure Gemini
 genai.configure(api_key=st.secrets["gemini"]["api_key"])
@@ -32,31 +31,30 @@ def get_gemini_analysis(ticker, price, signal, b_width, rsi, sma50, valuation):
     return response.text
 
 def get_sniper_report(ticker):
-    # 1. Create a "Chrome" session to bypass rate limits
-    session = curl_requests.Session(impersonate="chrome")
+    # We no longer pass a custom session. 
+    # yfinance 1.0+ handles impersonation internally now.
+    stock = yf.Ticker(ticker)
     
-    # 2. Attach session to yfinance
-    stock = yf.Ticker(ticker, session=session)
-    
-    # 3. Pull data with error handling
     try:
+        # auto_adjust=True is critical for technical accuracy
         df = stock.history(period="1y", auto_adjust=True)
     except Exception as e:
-        # Fallback for GTC Monday: If Yahoo blocks us, we need to know
-        print(f"Bypass failed: {e}")
+        st.error(f"Data Retrieval Error: {e}")
         return None, "ERROR", {}, 0
     
     if df.empty:
         return None, "NO DATA", {}, 0
 
-    # --- Rest of your indicators remain the same ---
+    # Flatten MultiIndex columns (Fix for the previous KeyError)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
         
+    # Standard Indicators
     df['SMA50'] = ta.sma(df['Close'], length=50)
     df['SMA100'] = ta.sma(df['Close'], length=100)
     df['RSI'] = ta.rsi(df['Close'], length=14)
     
+    # Bollinger Bands
     bb = ta.bbands(df['Close'], length=20, std=2)
     df['BBL'] = bb.iloc[:, 0]
     df['BBM'] = bb.iloc[:, 1]
@@ -64,6 +62,15 @@ def get_sniper_report(ticker):
     
     curr = df.iloc[-1]
     b_width = (curr['BBU'] - curr['BBL']) / curr['BBM']
+    
+    # Sniper Logic
+    signal = "NEUTRAL"
+    if curr['Close'] > curr['SMA50'] and b_width < 0.05:
+        signal = "BUY SQUEEZE"
+    elif curr['Close'] < curr['SMA50'] and b_width < 0.05:
+        signal = "SELL SQUEEZE"
+        
+    return df, signal, get_valuation_metrics(stock), b_width
 
 def get_valuation_metrics(ticker_obj):
     info = ticker_obj.info
