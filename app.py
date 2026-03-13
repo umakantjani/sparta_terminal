@@ -11,7 +11,12 @@ ticker = st.text_input("QUERY TICKER >", value="NVDA").upper()
 
 if ticker:
     df, signal, val, b_width = get_sniper_report(ticker)
-    curr = df.iloc[-1]
+    
+    if df is None:
+        st.error("Yahoo is currently rate-limiting the cloud. Try again in 5 minutes or use the Local Terminal.")
+    else:
+        # Show your metrics and chart as usual
+        curr = df.iloc[-1]
     
     # --- Metrics Grid ---
     c1, c2, c3, c4 = st.columns(4)
